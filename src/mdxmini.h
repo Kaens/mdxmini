@@ -57,4 +57,7 @@ extern int conv_with_iconv(char *origin, char *locale, const char *fromcode);
 #endif // USE_ICONV
 
 const char* utf8_strrchr(const char* str, unsigned long target_code_point);
+/* has the current song has entered its fade-out? */
+int mdx_is_fading(t_mdxmini *data);
+
 #endif

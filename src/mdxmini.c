@@ -230,9 +230,14 @@ int find_in_folder(char * fileString, char * folderString) {
 
 int mdx_open( t_mdxmini *data, char *filename , char *pcmdir )
 {
+  data->mdx = NULL;
+  data->pdx = NULL;
+  data->self = NULL;
+  data->songdata = NULL;
   data->nlg_tempo = -1;
 
-  data->songdata = malloc(sizeof(songdata));
+  data->songdata = calloc(1, sizeof(songdata));
+  if (!data->songdata) return -1;
 
   MDX_DATA *mdx = NULL;
   PDX_DATA *pdx = NULL;
@@ -267,6 +272,8 @@ int mdx_open( t_mdxmini *data, char *filename , char *pcmdir )
 
   if (!self_construct(data->songdata)) {
     /* failed to create class instances */
+    free(data->songdata);
+    data->songdata = NULL;
     return -1;
   }
     /* load mdx file */
@@ -274,6 +281,7 @@ int mdx_open( t_mdxmini *data, char *filename , char *pcmdir )
   data->mdx = mdx_open_mdx( filename );
   if ( !data->mdx )
   {
+    mdx_close(data);
     return -1;
   }
   mdx = data->mdx;
@@ -321,6 +329,7 @@ int mdx_open( t_mdxmini *data, char *filename , char *pcmdir )
   /* voice data load */
   if ( mdx_get_voice_parameter( mdx ) != 0 )
   {
+    mdx_close(data);
     return -1;
   }
 
@@ -331,6 +340,7 @@ int mdx_open( t_mdxmini *data, char *filename , char *pcmdir )
 
   if (!data->self)
   {
+    mdx_close(data);
     return -1;
   }
   data->samples = 0;
@@ -540,7 +550,12 @@ void mdx_close(t_mdxmini *data)
     mdx_close_pdx( data->pdx );
     mdx_close_mdx( data->mdx );
 
-    self_destroy(data->songdata);
+    if (data->songdata) self_destroy(data->songdata);
+    free(data->songdata);
+    data->songdata = NULL;
+    data->self = NULL;
+    data->mdx = NULL;
+    data->pdx = NULL;
 }
 
 int  mdx_get_sample_size ( t_mdxmini *data )

@@ -1,11 +1,5 @@
 #### mdxmini src ####
-if(MSVC OR MINGW)
-	cmake_minimum_required(VERSION 3.12)
-endif()
-
-if(UNIX)
-	cmake_minimum_required(VERSION 3.0.2)
-endif()
+cmake_minimum_required(VERSION 3.16)
 
 if(MSVC)
 	set(CMAKE_C_FLAGS "/Ox /W3 /wd4996")
@@ -62,6 +56,11 @@ include_directories(./..)
 file(GLOB SOURCES *.c)
 
 add_library(mdxmini STATIC ${SOURCES})
+target_include_directories(mdxmini PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(mdxmini PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(mdxmini PRIVATE -fcommon)
+endif()
 if(MSVC)
 	if(USE_LIBICONV)
 		# Iconv library is used for converting from SHIFT-JIS to UTF-8

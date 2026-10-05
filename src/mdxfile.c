@@ -15,6 +15,8 @@
 
 #include "version.h"
 #include "mdx.h"
+#include "lzx042.h"
+#include <limits.h>
 
 #if defined(_MSC_VER) || defined(__TINYC__)
 #include <windows.h>
@@ -67,26 +69,20 @@ __load_file(MDX_DATA* mdx, char* fnam)
     return FLAG_FALSE;
   }
 
-  fseek(fp, 0, SEEK_END);
-  len = (int)ftell(fp);
-  fseek(fp, 0, SEEK_SET);
-
-  buf = (unsigned char *)malloc(sizeof(unsigned char)*(len+16));
-
-  if (!buf) {
-    fclose(fp);
-    return FLAG_FALSE;
+  if (fseek(fp, 0, SEEK_END) != 0) { fclose(fp); return FLAG_FALSE; }
+  {
+    long size = ftell(fp);
+    if (size <= 0 || size > 16 * 1024 * 1024 || fseek(fp, 0, SEEK_SET) != 0) {
+      fclose(fp);
+      return FLAG_FALSE;
+    }
+    len = (int)size;
   }
-
-  memset(buf, 0, len);
-
-  result = (int)fread( buf, 1, len, fp );
+  buf = (unsigned char *)calloc((size_t)len + 16, 1);
+  if (!buf) { fclose(fp); return FLAG_FALSE; }
+  result = (int)fread(buf, 1, len, fp);
   fclose(fp);
-
-  if (result!=len) {
-    free(buf);
-    return FLAG_FALSE;
-  }
+  if (result != len) { free(buf); return FLAG_FALSE; }
 
   mdx->length = len;
   mdx->data = buf;
@@ -96,7 +92,7 @@ __load_file(MDX_DATA* mdx, char* fnam)
 
 MDX_DATA *mdx_open_mdx( char *name ) {
 
-  int i,j;
+  int i;
   int ptr;
   unsigned char *buf;
   MDX_DATA *mdx;
@@ -123,65 +119,66 @@ MDX_DATA *mdx_open_mdx( char *name ) {
   if (mdx->length<3) {
     goto error_end;
   }
-  while(1) {
-    if ( buf[ptr+0] == 0x0d &&
-     buf[ptr+1] == 0x0a &&
-     buf[ptr+2] == 0x1a ) break;
-
-    mdx->data_title[i++]=buf[ptr++];  /* warning! this text is SJIS */
-    if ( i>=MDX_MAX_TITLE_LENGTH ) i--;
-    if ( ptr > mdx->length ) return NULL;
+  /* titles and names must terminate inside the file
+    NUL in the title also rejects H. Yano's "cryptmdx" wrapper */
+  while (ptr + 2 < mdx->length &&
+         !(buf[ptr] == 0x0d && buf[ptr+1] == 0x0a && buf[ptr+2] == 0x1a)) {
+    if (!buf[ptr]) goto error_end;
+    if (i < MDX_MAX_TITLE_LENGTH - 1) mdx->data_title[i++] = buf[ptr]; /* Title text is Shift-JIS. */
+    ++ptr;
   }
-  mdx->data_title[i++]=0;
+  if (ptr + 2 >= mdx->length) goto error_end;
+  mdx->data_title[i] = 0;
+  ptr += 3;
 
-
-  /* pdx name */
-
-  ptr+=3;
-  for ( i=0 ; i<MDX_MAX_PDX_FILENAME_LENGTH ; i++ ) {
-    mdx->pdx_name[i]='\0';
+  i = 0;
+  while (ptr < mdx->length && buf[ptr]) {
+    if (i >= MDX_MAX_PDX_FILENAME_LENGTH - 5) goto error_end;
+    mdx->pdx_name[i++] = buf[ptr++]; /* PDX name is also Shift-JIS. */ /* the sample bank filenames are also Shift-JIS! */
   }
-  i=0;
-  mdx->haspdx=FLAG_FALSE;
-  while(1) {
-    if ( buf[ptr] == 0x00 ) break;
+  if (ptr >= mdx->length) goto error_end;
+  mdx->pdx_name[i] = 0;
+  mdx->haspdx = i ? FLAG_TRUE : FLAG_FALSE;
+  mdx->base_pointer = ++ptr;
 
-    mdx->haspdx=FLAG_TRUE;
-    mdx->pdx_name[i++] = buf[ptr++];  /* warning! this text is SJIS */
-    if ( i>= MDX_MAX_PDX_FILENAME_LENGTH ) i--;
-    if ( ptr > mdx->length ) goto error_end;
-  }
-
-  /* get voice data offset */
-
-  ptr++;
-  mdx->base_pointer = ptr;
-  mdx->voice_data_offset =
-    (unsigned int)buf[ptr+0]*256 +
-    (unsigned int)buf[ptr+1] + mdx->base_pointer;
-
-  if ( mdx->voice_data_offset > mdx->length ) goto error_end;
-
-   /* get MML data offset */
-
-  mdx->mml_data_offset[0] =
-    (unsigned int)buf[ptr+2+0] * 256 +
-    (unsigned int)buf[ptr+2+1] + mdx->base_pointer;
-  if ( mdx->mml_data_offset[0] > mdx->length ) goto error_end;
-
-  if ( buf[mdx->mml_data_offset[0]] == MDX_SET_PCM8_MODE ) {
-    mdx->ispcm8mode = 1;
-    mdx->tracks = 16;
-  } else {
-    mdx->ispcm8mode = 0;
-    mdx->tracks = 9;
+  {
+    unsigned char *expanded = NULL;
+    size_t expanded_size = 0;
+    int status = mdx_lzx042(buf + ptr, (size_t)(mdx->length - ptr),
+                           &expanded, &expanded_size);
+    if (status < 0) goto error_end;
+    if (status > 0) {
+      unsigned char *whole;
+      if (expanded_size > INT_MAX - (size_t)ptr - 16) {
+        free(expanded);
+        goto error_end;
+      }
+      whole = (unsigned char *)calloc((size_t)ptr + expanded_size + 16, 1);
+      if (!whole) { free(expanded); goto error_end; }
+      memcpy(whole, buf, ptr);
+      memcpy(whole + ptr, expanded, expanded_size);
+      free(expanded);
+      free(buf);
+      mdx->data = buf = whole;
+      mdx->length = ptr + (int)expanded_size;
+    }
   }
 
-  for ( i=0 ; i<mdx->tracks ; i++ ) {
-    mdx->mml_data_offset[i] =
-      (unsigned int)buf[ptr+i*2+2+0] * 256 +
-      (unsigned int)buf[ptr+i*2+2+1] + mdx->base_pointer;
-    if ( mdx->mml_data_offset[i] > mdx->length ) goto error_end;
+  /* Validate the whole offset table before looking at any track command. */
+  if (mdx->length - ptr < 20) goto error_end;
+  mdx->voice_data_offset = buf[ptr] * 256 + buf[ptr+1] + ptr;
+  mdx->mml_data_offset[0] = buf[ptr+2] * 256 + buf[ptr+3] + ptr;
+  if (mdx->mml_data_offset[0] < ptr + 20 ||
+      mdx->mml_data_offset[0] >= mdx->length) goto error_end;
+  mdx->ispcm8mode = buf[mdx->mml_data_offset[0]] == MDX_SET_PCM8_MODE;
+  mdx->tracks = mdx->ispcm8mode ? 16 : 9;
+  if (mdx->length - ptr < 2 + mdx->tracks * 2 ||
+      mdx->voice_data_offset < ptr + 2 + mdx->tracks * 2 ||
+      mdx->voice_data_offset > mdx->length) goto error_end;
+  for (i = 0; i < mdx->tracks; ++i) {
+    mdx->mml_data_offset[i] = buf[ptr+i*2+2] * 256 + buf[ptr+i*2+3] + ptr;
+    if (mdx->mml_data_offset[i] < ptr + 2 + mdx->tracks * 2 ||
+        mdx->mml_data_offset[i] >= mdx->length) goto error_end;
   }
 
   /* init. configuration */

@@ -1,20 +1,13 @@
-#### mdxmini ####
-if(MSVC OR MINGW)
-	cmake_minimum_required(VERSION 3.12)
-endif()
-
-if(UNIX)
-	cmake_minimum_required(VERSION 3.0.2)
-endif()
-
-if(COMMAND cmake_policy)
-	cmake_policy(SET CMP0003 NEW)
-endif()
+cmake_minimum_required(VERSION 3.16)
 
 # Define option here
+option(MDXMINI_BUILD_PLAYER "Build the SDL command-line player" ON)
+option(MDXMINI_BUILD_TESTS "Build loader regression tests" OFF)
 option(USE_LIBICONV "Iconv external dependency" FALSE)
 
 project(mdxmini LANGUAGES C)
+
+if(MDXMINI_BUILD_PLAYER)
 
 if(MSVC)
 	find_package(SDL2 CONFIG REQUIRED)
@@ -69,7 +62,11 @@ if(MSVC OR UNIX OR MINGW)
 	include_directories(src)
 endif()
 
+endif()
+
 add_subdirectory(src)
+
+if(MDXMINI_BUILD_PLAYER)
 
 add_executable(mdxplay sdlplay.c)
 
@@ -108,4 +105,14 @@ if(MINGW OR APPLE)
 		message(STATUS "Hand-made conversion from SHIFT-JIS to UTF-8.")
 	endif()
 	install(TARGETS mdxplay DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
+
+endif()
+
+if(MDXMINI_BUILD_TESTS)
+    enable_testing()
+    add_executable(mdxmini_test test/loader_test.c)
+    target_link_libraries(mdxmini_test PRIVATE mdxmini)
+    set_target_properties(mdxmini_test PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/tests/bin")
+    add_test(NAME mdxmini_loader COMMAND mdxmini_test)
 endif()

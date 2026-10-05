@@ -1162,3 +1162,8 @@ set_lfo_delay( int track, int delay, songdata *data )
   }
   return;
 }
+
+int mdx_is_fading(t_mdxmini *data) {
+  mdxmml_ym2151_instances *state = data && data->songdata ? __get_instances(data->songdata) : NULL;
+  return state && state->fade_out > 0;
+}
